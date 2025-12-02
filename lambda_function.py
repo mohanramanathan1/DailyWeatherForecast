@@ -1,6 +1,9 @@
 import json
 import requests
-import os
+import boto3
+
+# Initialize SSM client outside handler for Lambda optimization
+ssm = boto3.client('ssm', region_name='us-east-1')
 
 def lambda_handler(event, context):
     """
@@ -53,11 +56,9 @@ def get_weather():
 
 def send_to_telegram(weather_data):
     """Send weather data to Telegram"""
-    bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
-    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-    
-    if not bot_token or not chat_id:
-        raise Exception("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set")
+    # Fetch secrets from SSM Parameter Store
+    bot_token = get_parameter('/weather-bot/telegram-token')
+    chat_id = get_parameter('/weather-bot/telegram-chat-id')
     
     # Format message
     message = f"""🌤 *{weather_data['name']} Weather for Normal, IL*
@@ -80,3 +81,11 @@ Conditions: {weather_data['shortForecast']}
     response.raise_for_status()
     
     print(f"Sent to Telegram: {weather_data['shortForecast']}")
+
+def get_parameter(parameter_name):
+    """Fetch parameter from SSM Parameter Store"""
+    response = ssm.get_parameter(
+        Name=parameter_name,
+        WithDecryption=True
+    )
+    return response['Parameter']['Value']
