@@ -4,14 +4,14 @@ import os
 
 def lambda_handler(event, context):
     """
-    AWS Lambda function to fetch weather and post to Home Assistant
+    AWS Lambda function to fetch weather and post to Telegram
     """
     try:
         # Get weather data
         weather_data = get_weather()
         
-        # Post to Home Assistant
-        send_to_homeassistant(weather_data)
+        # Send to Telegram
+        send_to_telegram(weather_data)
         
         return {
             'statusCode': 200,
@@ -51,21 +51,32 @@ def get_weather():
         'detailedForecast': today['detailedForecast']
     }
 
-def send_to_homeassistant(weather_data):
-    """Send weather data to Home Assistant webhook"""
-    ha_webhook_url = os.environ.get('HA_WEBHOOK_URL')
+def send_to_telegram(weather_data):
+    """Send weather data to Telegram"""
+    bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     
-    if not ha_webhook_url:
-        raise Exception("HA_WEBHOOK_URL environment variable not set")
+    if not bot_token or not chat_id:
+        raise Exception("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set")
     
+    # Format message
+    message = f"""🌤 *{weather_data['name']} Weather for Normal, IL*
+
+Temperature: {weather_data['temperature']}°{weather_data['temperatureUnit']}
+Conditions: {weather_data['shortForecast']}
+
+{weather_data['detailedForecast']}
+"""
+    
+    # Send to Telegram
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
-        'temperature': f"{weather_data['temperature']}°{weather_data['temperatureUnit']}",
-        'conditions': weather_data['shortForecast'],
-        'detailed': weather_data['detailedForecast'],
-        'period': weather_data['name']
+        'chat_id': chat_id,
+        'text': message,
+        'parse_mode': 'Markdown'
     }
     
-    response = requests.post(ha_webhook_url, json=payload)
+    response = requests.post(url, json=payload)
     response.raise_for_status()
     
-    print(f"Sent to Home Assistant: {payload}")
+    print(f"Sent to Telegram: {weather_data['shortForecast']}")
