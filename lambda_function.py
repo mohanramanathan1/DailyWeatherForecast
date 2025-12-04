@@ -8,17 +8,29 @@ ssm = boto3.client('ssm', region_name='us-east-1')
 def lambda_handler(event, context):
     """
     AWS Lambda function to fetch weather and post to Telegram
+    Sends different content based on time of day:
+    - morning: Full 7-day forecast (6 AM)
+    - noon: Today + Tonight update (12 PM)
+    - evening: Tonight + Tomorrow update (9 PM)
+    
+    EventBridge passes the message_type in the event
     """
     try:
-        # Get weather data
-        weather_data = get_weather()
+        # Get all weather periods
+        all_periods = get_weather()
+        
+        # Get message type from EventBridge event (default to morning for testing)
+        message_type = event.get('message_type', 'morning')
+        
+        # Format the message based on time of day
+        weather_message = format_message(all_periods, message_type)
         
         # Send to Telegram
-        send_to_telegram(weather_data)
+        send_to_telegram(weather_message)
         
         return {
             'statusCode': 200,
-            'body': json.dumps('Weather updated successfully')
+            'body': json.dumps(f'Weather updated successfully - {message_type} message sent')
         }
     
     except Exception as e:
@@ -43,31 +55,52 @@ def get_weather():
     forecast_response = requests.get(forecast_url)
     forecast_data = forecast_response.json()
     
-    # Get today's forecast (first period)
-    today = forecast_data['properties']['periods'][0]
+    # Get all forecast periods
+    all_periods = forecast_data['properties']['periods']
     
-    return {
-        'name': today['name'],
-        'temperature': today['temperature'],
-        'temperatureUnit': today['temperatureUnit'],
-        'shortForecast': today['shortForecast'],
-        'detailedForecast': today['detailedForecast']
-    }
+    return all_periods
 
-def send_to_telegram(weather_data):
-    """Send weather data to Telegram"""
+def format_message(periods, message_type):
+    """Format weather message based on time of day"""
+    
+    if message_type == "morning":
+        # 6 AM: Full 7-day forecast (brief format)
+        message = "🌅 *Good Morning! 7-Day Weather Forecast for Normal, IL*\n\n"
+        
+        # Show first 14 periods (7 days × 2 periods per day)
+        for period in periods[:14]:
+            message += f"*{period['name']}*\n"
+            message += f"🌡️ {period['temperature']}°{period['temperatureUnit']} - {period['shortForecast']}\n\n"
+    
+    elif message_type == "noon":
+        # 12 PM: Today + Tonight (detailed format)
+        message = "☀️ *Midday Weather Update for Normal, IL*\n\n"
+        
+        # Show just next 2 periods (rest of today + tonight)
+        for period in periods[:2]:
+            message += f"*{period['name']}*\n"
+            message += f"🌡️ {period['temperature']}°{period['temperatureUnit']}\n"
+            message += f"{period['shortForecast']}\n\n"
+            message += f"_{period['detailedForecast']}_\n\n"
+    
+    elif message_type == "evening":
+        # 9 PM: Tonight + Tomorrow (detailed format)
+        message = "🌙 *Evening Weather Update for Normal, IL*\n\n"
+        
+        # Show next 3 periods (tonight + tomorrow day/night)
+        for period in periods[:3]:
+            message += f"*{period['name']}*\n"
+            message += f"🌡️ {period['temperature']}°{period['temperatureUnit']}\n"
+            message += f"{period['shortForecast']}\n\n"
+            message += f"_{period['detailedForecast']}_\n\n"
+    
+    return message
+
+def send_to_telegram(message):
+    """Send pre-formatted message to Telegram"""
     # Fetch secrets from SSM Parameter Store
     bot_token = get_parameter('/weather-bot/telegram-token')
     chat_id = get_parameter('/weather-bot/telegram-chat-id')
-    
-    # Format message
-    message = f"""🌤 *{weather_data['name']} Weather for Normal, IL*
-
-Temperature: {weather_data['temperature']}°{weather_data['temperatureUnit']}
-Conditions: {weather_data['shortForecast']}
-
-{weather_data['detailedForecast']}
-"""
     
     # Send to Telegram
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -80,7 +113,7 @@ Conditions: {weather_data['shortForecast']}
     response = requests.post(url, json=payload)
     response.raise_for_status()
     
-    print(f"Sent to Telegram: {weather_data['shortForecast']}")
+    print(f"Successfully sent weather update to Telegram")
 
 def get_parameter(parameter_name):
     """Fetch parameter from SSM Parameter Store"""
@@ -89,3 +122,5 @@ def get_parameter(parameter_name):
         WithDecryption=True
     )
     return response['Parameter']['Value']
+
+
